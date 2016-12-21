@@ -1,0 +1,4 @@
+*.o
+benchmark
+compare_results
+lat_stat

@@ -1,7 +1,9 @@
 
 CXXFLAGS := -std=c++11 -O3 -Werror -Wall -Wextra
 
-PROGRAMS := compare_results benchmark
+OSMIUM_INC := ../libosmium/include
+
+PROGRAMS := compare_results benchmark lat_stat
 
 all: ${PROGRAMS}
 
@@ -16,6 +18,12 @@ benchmark.o: benchmark.cpp
 
 benchmark: benchmark.o
 	${CXX} $^ -o $@
+
+lat_stat.o: lat_stat.cpp
+	${CXX} -c $^ ${CXXFLAGS} -I${OSMIUM_INC} -o $@
+
+lat_stat: lat_stat.o
+	${CXX} $^ -o $@ -lz -pthread
 
 clean:
 	rm -f ${PROGRAMS} *.o
