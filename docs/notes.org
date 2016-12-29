@@ -1,0 +1,281 @@
+#+title: Performance improvements for inverse Gudermannian function
+#+author: Michael Krasnyk
+#+options: toc:nil
+#+html_link_home:
+#+html_link_up:
+#+html_mathjax:
+#+html_head: <link rel="stylesheet" type="text/css" href="http://www.star.bris.ac.uk/bjm/css/bjm.css" />
+
+In order to speed up computation of a Mercator projection of a point $(\lambda, \varphi)$
+that involves the inverse [[https://en.wikipedia.org/wiki/Gudermannian_function][Gudermannian function]]
+\[
+x = R \lambda, \quad y = R \ln \left[ \tan \left( \frac{\pi}{4} + \frac{\varphi}{2} \right) \right]
+\]
+different tricks can be used.
+Here the numeric value of the earth radius is $R= 6378137$ (EPSG:3857).
+
+* Use the sine function instead of tangent
+
+One trick is to use double-angle formula for the cosine function
+\[
+\cos 2\theta = \frac{1-\tan^2\theta}{1+\tan^2\theta},
+\quad\text{or}\quad
+\tan^2\theta = \frac{1 - \cos 2\theta}{1 + \cos 2\theta}.
+\]
+Placed in $y$ gives
+\[
+y = R \ln \left[ \frac{1 - \cos (\frac{\pi}{2} + \varphi)}{1 + \cos (\frac{\pi}{2} + \varphi)} \right]^{\frac{1}{2}}
+  = \frac{1}{2} R \ln \left[ \frac{1 + \sin \varphi}{1 - \sin \varphi} \right]
+\]
+Performance gained because $\sin \theta$ computation is approximately 20% faster than $\tan \theta$.
+
+* Use a polynomial approximation
+
+The second trick is to use a polynomial approximation.
+The best approximation by a rational function is the [[https://en.wikipedia.org/wiki/Pad%C3%A9_approximant][Padé approximation]]
+where the Padé approximant of order $[m/n]$, $m\ge 0$, $n\ge 1$ is the rational function
+\[
+\hat{y} = \frac{\sum_{j=0}^m a_j \varphi^j}{1 + \sum_{k=1}^n b_k \varphi^k}.
+\]
+
+The [[https://en.wikipedia.org/wiki/Remez_algorithm][Remez algorithm]] that finds the minimax approximation
+can be used find coefficients $a_j$ and $b_k$.
+One implementation of the algorithm is included in the [[http://www.boost.org/doc/libs/1_63_0/libs/math/doc/html/math_toolkit/internals/minimax.html][Boost.Math]] library.
+
+
+#+begin_src sh
+sudo apt install libmpfr-dev libgmp-dev libntl-dev
+git clone http://github.com/boostorg/boost
+cd boost
+git submodule update --recursive --init
+./bootstrap.sh
+#+end_src
+
+https://github.com/boostorg/ublas/pull/46
+https://github.com/boostorg/math/pull/53
+
+
+#+NAME: libs/math/minimax/f.cpp
+#+begin_src cpp
+   case 42:
+   {
+       return log(tan(boost::math::constants::pi<double>() * (1. / 4. + x / 180. / 2.)));
+   }
+#+end_src
+
+
+#+begin_src sh
+./b2 release libs/math/minimax
+
+./libs/math/minimax/bin/minimax <<EOF
+variant 42
+pin true
+order 10 10
+absolute
+target-precision 53
+working-precision 256
+range -78 78
+step 1
+info
+EOF
+#+end_src
+
+#+begin_src maxima :exports both :file images/approximation-error.png :results graphics
+A:[ 0.00000000000000000e+00,  1.74532925181541924e-02, -9.48886714733577619e-06, -5.14483236972284849e-06, 2.53801360698030180e-09,  5.16175373655094521e-10,
+   -2.20225881581151031e-13, -1.96854479399833152e-14,  6.49052820186726701e-18,  2.04658527439432671e-19, -3.11125833784600832e-23];
+B:[ 1.00000000000000000e+00, -5.43672036010859947e-04, -3.45546751987863368e-04,  1.73019445085169732e-07, 4.32516091068641779e-08, -1.93000947857361296e-11,
+   -2.32987434393775411e-12,  8.68760908701761693e-16, 4.81414832735723520e-17, -1.25851403124467958e-20, -1.97411360668142313e-22];
+horner(p,x):=rreduce(lambda([a,y], a + (x*y)), p);
+r(x):= 6378137 * horner(A, x) / horner(B, x);
+f(x):= 6378137 * log(tan(%pi / 4. + %pi * x / 180. / 2.));
+plot2d([f(x) - r(x)], [x, -78, 78])$
+#+end_src
+
+#+results:
+[[file:images/approximation-error.png]]
+
+
+#+begin_src cpp :flags -std=c++11 :exports: both
+#include <iostream>
+#include <boost/math/constants/constants.hpp>
+
+template<typename T>
+constexpr double horner(double, const T an) { return an; }
+
+template<typename T, typename... U>
+constexpr double horner(double x, const T an, const U ...a) { return horner(x, a...) * x + an; }
+
+double approx(double lat)
+{
+    return 6378137. *
+        horner(lat, 0.00000000000000000e+00,  1.74532925181541924e-02, -9.48886714733577619e-06, -5.14483236972284849e-06,
+               2.53801360698030180e-09,  5.16175373655094521e-10, -2.20225881581151031e-13, -1.96854479399833152e-14,
+               6.49052820186726701e-18,  2.04658527439432671e-19, -3.11125833784600832e-23) /
+        horner(lat, 1.00000000000000000e+00, -5.43672036010859947e-04, -3.45546751987863368e-04,  1.73019445085169732e-07,
+               4.32516091068641779e-08, -1.93000947857361296e-11, -2.32987434393775411e-12,  8.68760908701761693e-16,
+               4.81414832735723520e-17, -1.25851403124467958e-20, -1.97411360668142313e-22);
+}
+
+int main()
+{
+    double lat = 45.;
+    std::cout << "f(" << lat << ") = " << 6378137. * log(tan(boost::math::constants::pi<double>() * ( 1. / 4. + lat / 180. / 2.)))
+              << ", approx = " << approx(lat)
+              << ", err = " << std::abs(6378137. * log(tan(boost::math::constants::pi<double>() * ( 1. / 4. + lat / 180. / 2.))) - approx(lat))
+              << "\n";
+}
+#+end_src
+
+#+results:
+| f(45) = 5.62152e+06 | approx = 5.62152e+06 | err = 7.37179e-05 |
+
+
+
+* Use a polynomial approximation with fixed-point coefficients
+
+If float point instructions are not accessible than polynomial value can be computed with fixed-point arithmetic[fn:1].
+
+\[
+\hat{y} = \frac{\sum_{j=0}^m a_j \varphi^j}{1 + \sum_{k=1}^n b_k \varphi^k}.
+\]
+
+
+2^30 a0 + 2^42 a1 / 2^42 * x + 2^64 a2 / 2^64 * x^2
+A0 +  x / 2^(42-30) (A1 + x / 2^(64-42) A2)
+
+
+
+
+#+begin_src cpp
+   case 42:
+   {
+      return  1e7 * log(tan(boost::math::constants::pi<double>() / 4. + boost::math::constants::pi<double>() * x / 1e7 / 180. / 2.));
+   }
+#+end_src
+
+#+begin_src sh
+./libs/math/minimax/bin/minimax <<EOF
+variant 42
+pin true
+order 8 8
+absolute
+target-precision 53
+working-precision 256
+range -700000000 700000000
+step 10
+info
+EOF
+#+end_src
+
+
+#+begin_src maxima :exports results :file images/fixed-point-approximation-error.png :results graphics
+A:[ 0.00000000000000000e+00, 1.74532924556019616e-02, -2.77262185306762557e-16, -3.72694256743231832e-20, 4.81363685795693323e-34, 2.29535346381510108e-38, -2.07465477489024894e-52, -3.53742385853494719e-57, 1.16169586848488374e-71];
+B:[ 1.00000000000000000e+00, -1.58859532422400327e-14, -2.64307673635186612e-18, 3.56453477148968955e-32, 2.27039162133027492e-36, -2.38419632718063700e-50, -6.75596211654911634e-55, 4.42329738944445972e-69, 4.09454133512147724e-74];
+q:32;
+Bx:1e7;
+
+A[1]:  0; K:q; for i:2 while i<=length(A) do ( Ki:q+ceiling(-log(abs(A[i]))/log(2)), A[i]:round(A[i]*(2^Ki)), A[i-1]:[A[i-1], Ki-K], K:Ki);
+B[1]:2^q; K:q; for i:2 while i<=length(B) do ( Ki:q+ceiling(-log(abs(B[i]))/log(2)), B[i]:round(B[i]*(2^Ki)), B[i-1]:[B[i-1], Ki-K], K:Ki);
+
+horner(p,x):=rreduce(lambda([a,y],a[1] + truncate(x*y/2^a[2])), p);
+r(x):= 6378137 * horner(A,round(x))/horner(B,round(x)) / Bx;
+f(x):= 6378137 * log(tan(%pi / 4. + %pi * x / Bx / 180. / 2.));
+
+plot2d([f(x)-r(x)], [x, Bx * -70, Bx * 70])$
+#+end_src
+
+#+results:
+[[file:images/fixed-point-approximation-error.png]]
+
+
+
+#+name: fixed-point-cpp-code
+#+begin_src maxima :results raw :exports both
+A:[ 0.00000000000000000e+00, 1.74532924556019616e-02, -2.77262185306762557e-16, -3.72694256743231832e-20, 4.81363685795693323e-34, 2.29535346381510108e-38, -2.07465477489024894e-52, -3.53742385853494719e-57, 1.16169586848488374e-71];
+B:[ 1.00000000000000000e+00, -1.58859532422400327e-14, -2.64307673635186612e-18, 3.56453477148968955e-32, 2.27039162133027492e-36, -2.38419632718063700e-50, -6.75596211654911634e-55, 4.42329738944445972e-69, 4.09454133512147724e-74];
+q:32;
+Bx:1e7;
+
+A[1]:  0; K:q; for i:2 while i<=length(A) do ( Ki:q+ceiling(-log(abs(A[i]))/log(2)), A[i]:round(A[i]*(2^Ki)), A[i-1]:[A[i-1], Ki-K], K:Ki);
+B[1]:2^q; K:q; for i:2 while i<=length(B) do ( Ki:q+ceiling(-log(abs(B[i]))/log(2)), B[i]:round(B[i]*(2^Ki)), B[i-1]:[B[i-1], Ki-K], K:Ki);
+
+printf(true, "#+begin_src cpp~%    __int128_t p = ~a;~%", A[length(A)]);
+for i:length(A)-1 step -1 while i>=1 do ( printf(true, "    p = ~a + ((x * p) >> ~a);~%", A[i][1], A[i][2]));
+printf(true, "    __int128_t q = ~a;~%", B[length(B)]);
+for i:length(B)-1 step -1 while i>=1 do ( printf(true, "    q = ~a + ((x * q) >> ~a);~%", B[i][1], B[i][2]));
+printf(true, "    return earth_radius_for_epsg3857 * double(p) / double(q) / ~a;~%#+end_src", Bx);
+#+end_src
+
+#+results: fixed-point-cpp-code
+#+begin_src cpp
+    __int128_t p = 5509742251;
+    p = -5960547410 + ((x * p) >> 48);
+    p = -5334146698 + ((x * p) >> 16);
+    p = 8386657114 + ((x * p) >> 46);
+    p = 5367384452 + ((x * p) >> 15);
+    p = -5905576228 + ((x * p) >> 46);
+    p = -5363030634 + ((x * p) >> 13);
+    p = 4797524499 + ((x * p) >> 46);
+    p = 0 + ((x * p) >> 6);
+    __int128_t q = 4971461300;
+    q = 8194925537 + ((x * q) >> 16);
+    q = -4446786581 + ((x * q) >> 48);
+    q = -4789069729 + ((x * q) >> 15);
+    q = 6480822406 + ((x * q) >> 46);
+    q = 6210295445 + ((x * q) >> 14);
+    q = -6543941038 + ((x * q) >> 46);
+    q = -4801234761 + ((x * q) >> 13);
+    q = 4294967296 + ((x * q) >> 46);
+    return earth_radius_for_epsg3857 * double(p) / double(q) / 10000000.0;
+#+end_src
+
+
+
+* Performance comparison
+
+** Compiled with ~-O0~
+|tan     | 1086ms | 100% |
+|sin     | 940ms  | 86%  |
+|polynom | 1571ms | 144% |
+|fixed   | 924ms  | 85%  |
+
+** Compiled with ~-O3~
+|tan     | 934ms | 100% |
+|sin     | 831ms | 88%  |
+|polynom | 328ms | 35%  |
+|fixed   | 624ms | 66%  |
+
+** Compiled with ~-O3 -march=native~ and using FMA instrucions
+| tan     | 780ms | 100% |
+| sin     | 605ms | 77%  |
+| polynom | 71ms  | 9%   |
+| fixed   | 434ms | 55%  |
+
+
+vmovsd 0x5f0(%rip),%xmm1
+vfmadd213sd 0x5ef(%rip),%xmm0,%xmm1
+vfmadd213sd 0x5ee(%rip),%xmm0,%xmm1
+vmovsd 0x62e(%rip),%xmm3
+vfmadd213sd 0x62d(%rip),%xmm0,%xmm3
+vfmadd213sd 0x5dc(%rip),%xmm0,%xmm1
+vfmadd213sd 0x623(%rip),%xmm0,%xmm3
+vfmadd213sd 0x5d2(%rip),%xmm0,%xmm1
+vfmadd213sd 0x619(%rip),%xmm0,%xmm3
+vfmadd213sd 0x5c8(%rip),%xmm0,%xmm1
+vfmadd213sd 0x60f(%rip),%xmm0,%xmm3
+vfmadd213sd 0x5be(%rip),%xmm0,%xmm1
+vfmadd213sd 0x605(%rip),%xmm0,%xmm3
+vfmadd213sd 0x5b4(%rip),%xmm0,%xmm1
+vfmadd213sd 0x5fb(%rip),%xmm0,%xmm3
+vfmadd213sd 0x5aa(%rip),%xmm0,%xmm1
+vfmadd213sd 0x5f1(%rip),%xmm0,%xmm3
+vfmadd213sd 0x5a0(%rip),%xmm0,%xmm1
+vfmadd213sd 0x5e7(%rip),%xmm0,%xmm3
+vfmadd213sd 0x5e6(%rip),%xmm0,%xmm3
+vfmadd132sd %xmm0,%xmm6,%xmm1
+vmulsd 0x589(%rip),%xmm1,%xmm1
+vfmadd132sd %xmm3,%xmm5,%xmm0
+vdivsd %xmm0,%xmm1,%xmm0
+
+
+[fn:1]Florent De Dinechin. On fixed-point hardware polynomials. 2015. [[https://hal.inria.fr/hal-01214739/document][<hal-01214739>]]

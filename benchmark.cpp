@@ -22,9 +22,9 @@ std::chrono::milliseconds timethis(Func&& func) {
 
 int main() {
     std::mt19937_64 gen;
-    std::uniform_real_distribution<double> dis{-90.0, 90.0};
+    std::uniform_real_distribution<double> dis{-70.0, 70.0};
 
-    const int num = 1000000;
+    const int num = 10000000;
 
     std::vector<double> data, r1, r2, r3;
     data.resize(num);
@@ -63,14 +63,13 @@ int main() {
 
     std::cout << "polynom : " << d_poly.count() << "ms  " << (d_poly * 100 / d_tan) << "%\n";
 
-    auto d_combo = timethis([&](){
+    auto d_fixed = timethis([&](){
         int i = 0;
         for (auto& val : data) {
-            r3[i++] = lat_to_y(val);
+            r3[i++] = lat_to_y_fixed(val);
         }
     });
 
-    std::cout << "sin/poly: " << d_combo.count() << "ms  " << (d_combo * 100 / d_tan) << "%\n";
+    std::cout << "fixed: " << d_fixed.count() << "ms  " << (d_fixed * 100 / d_tan) << "%\n";
 
 }
-

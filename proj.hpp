@@ -1,6 +1,7 @@
 #ifndef PROJ_HPP
 #define PROJ_HPP
 
+#include <array>
 #include <cmath>
 #include <iostream>
 
@@ -45,45 +46,68 @@ constexpr double horner(double x, T an, U... a) noexcept {
     return horner(x, a...) * x + an;
 }
 
-// polynomial approximation
-inline double lat_to_y_with_poly(double lat) {
-    // Approximate the inverse Gudermannian function with the Padé approximant [11/11]: deg → deg
-    // Coefficients are computed for the argument range [-70°,70°] by Remez algorithm
-    // |err|_∞=3.387e-12
-    return deg_to_rad( horner(lat,
-        0.00000000000000000000000000e+00,
-        1.00000000000089108431373566e+00,
-        2.34439410386997223035693483e-06,
-        -3.21291701673364717170998957e-04,
-        -6.62778508496089940141103135e-10,
-        3.68188055470304769936079078e-08,
-        6.31192702320492485752941578e-14,
-        -1.77274453235716299127325443e-12,
-        -2.24563810831776747318521450e-18,
-        3.13524754818073129982475171e-17,
-        2.09014225025314211415458228e-23,
-        -9.82938075991732185095509716e-23) /
-    horner(lat,
-        1.00000000000000000000000000e+00,
-        2.34439410398970701719081061e-06,
-        -3.72061271627251952928813333e-04,
-        -7.81802389685429267252612620e-10,
-        5.18418724186576447072888605e-08,
-        9.37468561198098681003717477e-14,
-        -3.30833288607921773936702558e-12,
-        -4.78446279888774903983338274e-18,
-        9.32999229169156878168234191e-17,
-        9.17695141954265959600965170e-23,
-        -8.72130728982012387640166055e-22,
-        -3.23083224835967391884404730e-28)) * earth_radius_for_epsg3857;
+template <typename Arg, class... Ts>
+Arg horner_i(Arg x, Ts... coeffs)
+{
+    constexpr size_t degree = sizeof...(coeffs);
+    std::array<Arg, degree> temp{coeffs...};
+
+    Arg result{0};
+    for (std::size_t index = temp.size(); index > 0; --index)
+        result = temp[index - 1] + result * x;
+
+    return result;
 }
 
-inline double lat_to_y(double lat) {
-    if (lat < -70.0 || lat > 70.0) {
+// polynomial approximation
+inline double lat_to_y_with_poly(double lat) {
+    if (lat < -78.0 || lat > 78.0)
         return lat_to_y_with_sin(lat);
-    } else {
-        return lat_to_y_with_poly(lat);
-    }
+
+    // Approximate the inverse Gudermannian function with the Padé approximant [10/10]: deg → deg
+    // Coefficients are computed for the argument range [-78°,78°] by Remez algorithm
+    // |err|_∞=5.486e-10
+    return earth_radius_for_epsg3857 *
+        horner(lat,
+               0.00000000000000000e+00,  1.74532925181541924e-02, -9.48886714733577619e-06,
+               -5.14483236972284849e-06, 2.53801360698030180e-09,  5.16175373655094521e-10,
+               -2.20225881581151031e-13, -1.96854479399833152e-14, 6.49052820186726701e-18,
+               2.04658527439432671e-19, -3.11125833784600832e-23) /
+        horner(lat,
+               1.00000000000000000e+00, -5.43672036010859947e-04, -3.45546751987863368e-04,
+               1.73019445085169732e-07, 4.32516091068641779e-08, -1.93000947857361296e-11,
+               -2.32987434393775411e-12,  8.68760908701761693e-16, 4.81414832735723520e-17,
+               -1.25851403124467958e-20, -1.97411360668142313e-22);
+}
+
+inline double lat_to_y_fixed(double lat) {
+    if (lat < -70.0 || lat > 70.0)
+        return lat_to_y_with_sin(lat);
+
+    // Approximate the inverse Gudermannian function with the Padé approximant [8/8]: deg → deg
+    // Coefficients are computed for the argument range [-70e7,70e7] by Remez algorithm
+    // |err|_∞=3.428e-03
+
+    std::int64_t x = static_cast<std::int64_t>(std::round(lat * 1e7));
+    __int128_t p = 5509742251;
+    p = -5960547410 + ((x * p) >> 48);
+    p = -5334146698 + ((x * p) >> 16);
+    p = 8386657114 + ((x * p) >> 46);
+    p = 5367384452 + ((x * p) >> 15);
+    p = -5905576228 + ((x * p) >> 46);
+    p = -5363030634 + ((x * p) >> 13);
+    p = 4797524499 + ((x * p) >> 46);
+    p = 0 + ((x * p) >> 6);
+    __int128_t q = 4971461300;
+    q = 8194925537 + ((x * q) >> 16);
+    q = -4446786581 + ((x * q) >> 48);
+    q = -4789069729 + ((x * q) >> 15);
+    q = 6480822406 + ((x * q) >> 46);
+    q = 6210295445 + ((x * q) >> 14);
+    q = -6543941038 + ((x * q) >> 46);
+    q = -4801234761 + ((x * q) >> 13);
+    q = 4294967296 + ((x * q) >> 46);
+    return earth_radius_for_epsg3857 * double(p) / double(q) / 1e7;
 }
 
 constexpr inline double x_to_lon(double x) {
