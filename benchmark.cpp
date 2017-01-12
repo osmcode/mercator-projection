@@ -1,6 +1,7 @@
 #include <array>
 #include <cmath>
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <random>
 
@@ -42,7 +43,7 @@ int main() {
         }
     });
 
-    std::cout << "tan     : " << d_tan.count() << "ms  100%\n";
+    std::cout << "tan      : " << std::setw(5) << d_tan.count() << "ms  100%\n";
 
     auto d_sin = timethis([&](){
         int i = 0;
@@ -51,7 +52,7 @@ int main() {
         }
     });
 
-    std::cout << "sin     : " << d_sin.count() << "ms  " << (d_sin * 100 / d_tan) << "%\n";
+    std::cout << "sin      : " << std::setw(5) << d_sin.count() << "ms  " << std::setw(3) << (d_sin * 100 / d_tan) << "%\n";
 
     auto d_poly = timethis([&](){
         int i = 0;
@@ -60,7 +61,7 @@ int main() {
         }
     });
 
-    std::cout << "polynom : " << d_poly.count() << "ms  " << (d_poly * 100 / d_tan) << "%\n";
+    std::cout << "polynom  : " << std::setw(5) << d_poly.count() << "ms  " << std::setw(3) << (d_poly * 100 / d_tan) << "%\n";
 
     auto d_poly_unrolled = timethis([&](){
         int i = 0;
@@ -69,7 +70,7 @@ int main() {
         }
     });
 
-    std::cout << "unrolled : " << d_poly_unrolled.count() << "ms  " << (d_poly_unrolled * 100 / d_tan) << "%\n";
+    std::cout << "unrolled : " << std::setw(5) << d_poly_unrolled.count() << "ms  " << std::setw(3) << (d_poly_unrolled * 100 / d_tan) << "%\n";
 
     auto d_fixed = timethis([&](){
         int i = 0;
@@ -78,6 +79,6 @@ int main() {
         }
     });
 
-    std::cout << "fixed: " << d_fixed.count() << "ms  " << (d_fixed * 100 / d_tan) << "%\n";
+    std::cout << "fixed    : " << std::setw(5) << d_fixed.count() << "ms  " << std::setw(3) << (d_fixed * 100 / d_tan) << "%\n";
 
 }
