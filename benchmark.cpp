@@ -1,4 +1,3 @@
-
 #include <array>
 #include <cmath>
 #include <chrono>
@@ -22,7 +21,7 @@ std::chrono::milliseconds timethis(Func&& func) {
 
 int main() {
     std::mt19937_64 gen;
-    std::uniform_real_distribution<double> dis{-70.0, 70.0};
+    std::uniform_real_distribution<double> dis{-85.0, 85.0};
 
     const int num = 10000000;
 
@@ -62,6 +61,15 @@ int main() {
     });
 
     std::cout << "polynom : " << d_poly.count() << "ms  " << (d_poly * 100 / d_tan) << "%\n";
+
+    auto d_poly_unrolled = timethis([&](){
+        int i = 0;
+        for (auto& val : data) {
+            r3[i++] = lat_to_y_unrolled(val);
+        }
+    });
+
+    std::cout << "unrolled : " << d_poly_unrolled.count() << "ms  " << (d_poly_unrolled * 100 / d_tan) << "%\n";
 
     auto d_fixed = timethis([&](){
         int i = 0;

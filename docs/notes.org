@@ -1,4 +1,4 @@
-#+title: Performance improvements for inverse Gudermannian function
+#+title: DRAFT Performance improvements for inverse Gudermannian function
 #+author: Michael Krasnyk
 #+options: toc:nil
 #+html_link_home:
@@ -38,11 +38,10 @@ where the Padé approximant of order $[m/n]$, $m\ge 0$, $n\ge 1$ is the rational
 \hat{y} = \frac{\sum_{j=0}^m a_j \varphi^j}{1 + \sum_{k=1}^n b_k \varphi^k}.
 \]
 
-The [[https://en.wikipedia.org/wiki/Remez_algorithm][Remez algorithm]] that finds the minimax approximation
-can be used find coefficients $a_j$ and $b_k$.
+To find coefficients $a_j$ and $b_k$ the [[https://en.wikipedia.org/wiki/Remez_algorithm][Remez algorithm]] that finds the minimax approximation.
 One implementation of the algorithm is included in the [[http://www.boost.org/doc/libs/1_63_0/libs/math/doc/html/math_toolkit/internals/minimax.html][Boost.Math]] library.
 
-
+To use the algorithm a local copy of Boost library is required
 #+begin_src sh
 sudo apt install libmpfr-dev libgmp-dev libntl-dev
 git clone http://github.com/boostorg/boost
@@ -51,10 +50,11 @@ git submodule update --recursive --init
 ./bootstrap.sh
 #+end_src
 
-https://github.com/boostorg/ublas/pull/46
-https://github.com/boostorg/math/pull/53
+At the moment the following PRs are needed to compile minimax:
+- https://github.com/boostorg/ublas/pull/46
+- https://github.com/boostorg/math/pull/53
 
-
+The original function must be defined in ~libs/math/minimax/f.cpp~ as
 #+NAME: libs/math/minimax/f.cpp
 #+begin_src cpp
    case 42:
@@ -63,7 +63,7 @@ https://github.com/boostorg/math/pull/53
    }
 #+end_src
 
-
+Compiling and running the approximation algorithm
 #+begin_src sh
 ./b2 release libs/math/minimax
 
@@ -79,7 +79,10 @@ step 1
 info
 EOF
 #+end_src
+produce the output that contains the approximation error ~Maximum Deviation Found: 5.486e-10~ and to arrays ~P~ and ~Q~
+with coefficients $a_i$ and $b_i$.
 
+The approximation error
 #+begin_src maxima :exports both :file images/approximation-error.png :results graphics
 A:[ 0.00000000000000000e+00,  1.74532925181541924e-02, -9.48886714733577619e-06, -5.14483236972284849e-06, 2.53801360698030180e-09,  5.16175373655094521e-10,
    -2.20225881581151031e-13, -1.96854479399833152e-14,  6.49052820186726701e-18,  2.04658527439432671e-19, -3.11125833784600832e-23];
@@ -93,7 +96,6 @@ plot2d([f(x) - r(x)], [x, -78, 78])$
 
 #+results:
 [[file:images/approximation-error.png]]
-
 
 #+begin_src cpp :flags -std=c++11 :exports: both
 #include <iostream>
@@ -129,23 +131,58 @@ int main()
 #+results:
 | f(45) = 5.62152e+06 | approx = 5.62152e+06 | err = 7.37179e-05 |
 
+* Unrolled implementation for floating-point approximation
+
+The above implementation of the Horner method produces $n+m$ function calls that
+in debug mode without code optimization that makes computation slower.
+To avoid function call overhead [[http://www.boost.org/doc/libs/1_63_0/libs/math/doc/html/math_toolkit/tuning.html][Boost.Math]] has performance tuning of
+[[https://github.com/boostorg/math/blob/develop/include/boost/math/tools/detail/rational_horner1_11.hpp#L134-L144][unrolled Horner schemes]].
+
+#+name: unrolled-floating-point-cpp-code
+#+begin_src maxima :results raw :exports both
+fpprec:20;
+A:bfloat([ 0.00000000000000000e+00,  1.74532925181541924e-02, -9.48886714733577619e-06, -5.14483236972284849e-06, 2.53801360698030180e-09,  5.16175373655094521e-10,
+   -2.20225881581151031e-13, -1.96854479399833152e-14,  6.49052820186726701e-18,  2.04658527439432671e-19, -3.11125833784600832e-23]);
+B:bfloat([ 1.00000000000000000e+00, -5.43672036010859947e-04, -3.45546751987863368e-04,  1.73019445085169732e-07, 4.32516091068641779e-08, -1.93000947857361296e-11,
+   -2.32987434393775411e-12,  8.68760908701761693e-16, 4.81414832735723520e-17, -1.25851403124467958e-20, -1.97411360668142313e-22]);
+a:ssubst("e", "b", printf(false, "~a", A[length(A)]));
+for i:length(A)-1 step -1 while i>=1 do ( a:ssubst("e", "b", printf(false, "(~a * lat + ~a)", a, A[i])));
+b:ssubst("e", "b", printf(false, "~a", B[length(B)]));
+for i:length(B)-1 step -1 while i>=1 do ( b:ssubst("e", "b", printf(false, "(~a * lat + ~a)", b, B[i])));
+
+printf(true, "#+begin_src cpp~%    return earth_radius_for_epsg3857 *~%    ~a~%    /~%    ~a;~%#+end_src", a, b);
+#+end_src
+
+#+results: unrolled-floating-point-cpp-code
+#+begin_src cpp
+    return earth_radius_for_epsg3857 *
+    ((((((((((-3.1112583378460085319e-23 * lat + 2.0465852743943268009e-19) * lat + 6.4905282018672673884e-18) * lat + -1.9685447939983315591e-14) * lat + -2.2022588158115104182e-13) * lat + 5.1617537365509453239e-10) * lat + 2.5380136069803016519e-9) * lat + -5.1448323697228488745e-6) * lat + -9.4888671473357768301e-6) * lat + 1.7453292518154191887e-2) * lat + 0.0e0)
+    /
+    ((((((((((-1.9741136066814230637e-22 * lat + -1.258514031244679556e-20) * lat + 4.8141483273572351796e-17) * lat + 8.6876090870176172185e-16) * lat + -2.3298743439377541768e-12) * lat + -1.9300094785736130185e-11) * lat + 4.3251609106864178231e-8) * lat + 1.7301944508516974048e-7) * lat + -3.4554675198786337842e-4) * lat + -5.4367203601085991108e-4) * lat + 1.0e0);
+#+end_src
+
 
 
 * Use a polynomial approximation with fixed-point coefficients
 
-If float point instructions are not accessible than polynomial value can be computed with fixed-point arithmetic[fn:1].
+Also numerator and denominator polynomial values can be computed with fixed-point arithmetic[fn:1] as
 
 \[
-\hat{y} = \frac{\sum_{j=0}^m a_j \varphi^j}{1 + \sum_{k=1}^n b_k \varphi^k}.
+p(x) = B_p \sum_{i=0}^n \frac{2^{K_i} p_i}{2^{K_i}} (B_x x)^i
 \]
 
+where $B_x=10^7$ is the argument precision, $B_p=10^7$ is the result precision,
+and $K_i=\lceil \log_2 \frac{p_{i-1}}{p_i}\rceil$ is a binary precision value for coefficient $p_i$.
 
-2^30 a0 + 2^42 a1 / 2^42 * x + 2^64 a2 / 2^64 * x^2
-A0 +  x / 2^(42-30) (A1 + x / 2^(64-42) A2)
+The fixed-point polynom is
+\[
+p(x) = B_p \sum_{i=0}^n \frac{\hat{p}_i}{2^{K_i}} (B_x x)^i
+\]
+where $\hat{p}_i=2^{K_i} p_i$ is an $i$-th fixed-point coefficient
+and $2^{K_i}$ is a coefficient normalization factor.
 
 
-
-
+The original function must include both $B_x$ and $B_y$ factors
 #+begin_src cpp
    case 42:
    {
@@ -153,6 +190,7 @@ A0 +  x / 2^(42-30) (A1 + x / 2^(64-42) A2)
    }
 #+end_src
 
+Running the Remez algorithm
 #+begin_src sh
 ./libs/math/minimax/bin/minimax <<EOF
 variant 42
@@ -166,29 +204,9 @@ step 10
 info
 EOF
 #+end_src
+gives ~Maximum Deviation Found: 3.428e-03~ and floating-point coefficients ~P~ and ~Q~ that must be multiplied by $2^{K_i}$ factors.
 
-
-#+begin_src maxima :exports results :file images/fixed-point-approximation-error.png :results graphics
-A:[ 0.00000000000000000e+00, 1.74532924556019616e-02, -2.77262185306762557e-16, -3.72694256743231832e-20, 4.81363685795693323e-34, 2.29535346381510108e-38, -2.07465477489024894e-52, -3.53742385853494719e-57, 1.16169586848488374e-71];
-B:[ 1.00000000000000000e+00, -1.58859532422400327e-14, -2.64307673635186612e-18, 3.56453477148968955e-32, 2.27039162133027492e-36, -2.38419632718063700e-50, -6.75596211654911634e-55, 4.42329738944445972e-69, 4.09454133512147724e-74];
-q:32;
-Bx:1e7;
-
-A[1]:  0; K:q; for i:2 while i<=length(A) do ( Ki:q+ceiling(-log(abs(A[i]))/log(2)), A[i]:round(A[i]*(2^Ki)), A[i-1]:[A[i-1], Ki-K], K:Ki);
-B[1]:2^q; K:q; for i:2 while i<=length(B) do ( Ki:q+ceiling(-log(abs(B[i]))/log(2)), B[i]:round(B[i]*(2^Ki)), B[i-1]:[B[i-1], Ki-K], K:Ki);
-
-horner(p,x):=rreduce(lambda([a,y],a[1] + truncate(x*y/2^a[2])), p);
-r(x):= 6378137 * horner(A,round(x))/horner(B,round(x)) / Bx;
-f(x):= 6378137 * log(tan(%pi / 4. + %pi * x / Bx / 180. / 2.));
-
-plot2d([f(x)-r(x)], [x, Bx * -70, Bx * 70])$
-#+end_src
-
-#+results:
-[[file:images/fixed-point-approximation-error.png]]
-
-
-
+Generated code for the Horner scheme with fixed-point arithmetic
 #+name: fixed-point-cpp-code
 #+begin_src maxima :results raw :exports both
 A:[ 0.00000000000000000e+00, 1.74532924556019616e-02, -2.77262185306762557e-16, -3.72694256743231832e-20, 4.81363685795693323e-34, 2.29535346381510108e-38, -2.07465477489024894e-52, -3.53742385853494719e-57, 1.16169586848488374e-71];
@@ -229,29 +247,51 @@ printf(true, "    return earth_radius_for_epsg3857 * double(p) / double(q) / ~a;
     return earth_radius_for_epsg3857 * double(p) / double(q) / 10000000.0;
 #+end_src
 
+The approximation error shows pretty bad behavior with respect to floating-point approximation:
+#+begin_src maxima :exports results :file images/fixed-point-approximation-error.png :results graphics
+A:[ 0.00000000000000000e+00, 1.74532924556019616e-02, -2.77262185306762557e-16, -3.72694256743231832e-20, 4.81363685795693323e-34, 2.29535346381510108e-38, -2.07465477489024894e-52, -3.53742385853494719e-57, 1.16169586848488374e-71];
+B:[ 1.00000000000000000e+00, -1.58859532422400327e-14, -2.64307673635186612e-18, 3.56453477148968955e-32, 2.27039162133027492e-36, -2.38419632718063700e-50, -6.75596211654911634e-55, 4.42329738944445972e-69, 4.09454133512147724e-74];
+q:32;
+Bx:1e7;
 
+A[1]:  0; K:q; for i:2 while i<=length(A) do ( Ki:q+ceiling(-log(abs(A[i]))/log(2)), A[i]:round(A[i]*(2^Ki)), A[i-1]:[A[i-1], Ki-K], K:Ki);
+B[1]:2^q; K:q; for i:2 while i<=length(B) do ( Ki:q+ceiling(-log(abs(B[i]))/log(2)), B[i]:round(B[i]*(2^Ki)), B[i-1]:[B[i-1], Ki-K], K:Ki);
+
+horner(p,x):=rreduce(lambda([a,y],a[1] + truncate(x*y/2^a[2])), p);
+r(x):= 6378137 * horner(A,round(x))/horner(B,round(x)) / Bx;
+f(x):= 6378137 * log(tan(%pi / 4. + %pi * x / Bx / 180. / 2.));
+
+plot2d([f(x)-r(x)], [x, Bx * -70, Bx * 70])$
+#+end_src
+
+#+results:
+[[file:images/fixed-point-approximation-error.png]]
 
 * Performance comparison
 
 ** Compiled with ~-O0~
-|tan     | 1086ms | 100% |
-|sin     | 940ms  | 86%  |
-|polynom | 1571ms | 144% |
-|fixed   | 924ms  | 85%  |
+| tan      | 1110ms | 100% |
+| sin      | 958ms  |  86% |
+| polynom  | 1538ms | 138% |
+| unrolled | 477ms  |  42% |
+| fixed    | 964ms  |  86% |
 
 ** Compiled with ~-O3~
-|tan     | 934ms | 100% |
-|sin     | 831ms | 88%  |
-|polynom | 328ms | 35%  |
-|fixed   | 624ms | 66%  |
+| tan      | 983ms | 100% |
+| sin      | 879ms |  89% |
+| polynom  | 356ms |  36% |
+| unrolled | 381ms |  38% |
+| fixed    | 678ms |  68% |
 
 ** Compiled with ~-O3 -march=native~ and using FMA instrucions
-| tan     | 780ms | 100% |
-| sin     | 605ms | 77%  |
-| polynom | 71ms  | 9%   |
-| fixed   | 434ms | 55%  |
+| tan      | 794ms | 100% |
+| sin      | 618ms |  77% |
+| polynom  | 122ms |  15% |
+| unrolled | 122ms |  15% |
+| fixed    | 474ms |  59% |
 
-
+The optimized floating-point approximation contains 24 FMA instructions
+#+begin_example
 vmovsd 0x5f0(%rip),%xmm1
 vfmadd213sd 0x5ef(%rip),%xmm0,%xmm1
 vfmadd213sd 0x5ee(%rip),%xmm0,%xmm1
@@ -276,6 +316,7 @@ vfmadd132sd %xmm0,%xmm6,%xmm1
 vmulsd 0x589(%rip),%xmm1,%xmm1
 vfmadd132sd %xmm3,%xmm5,%xmm0
 vdivsd %xmm0,%xmm1,%xmm0
+#+end_example
 
-
+* Footnotes
 [fn:1]Florent De Dinechin. On fixed-point hardware polynomials. 2015. [[https://hal.inria.fr/hal-01214739/document][<hal-01214739>]]
